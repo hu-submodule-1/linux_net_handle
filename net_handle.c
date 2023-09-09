@@ -192,3 +192,56 @@ bool set_netmask(const char *netmask, const char *interface_name)
 
     return true;
 }
+
+/**
+ * @brief  点分格式子网掩码转换为CIDR格式
+ * @param  cidr   : 输出参数, CIDR格式子网掩码
+ * @param  netmask: 输入参数, 点分格式子网掩码
+ * @return true : 成功
+ * @return false: 失败
+ */
+bool netmask_to_cidr(uint8_t *cidr, const char *netmask)
+{
+    assert(NULL != cidr);
+    assert(NULL != netmask);
+
+    struct in_addr addr = {0};
+    if (1 == inet_pton(AF_INET, netmask, &addr))
+    {
+        uint32_t netmask_num = ntohl(addr.s_addr);
+        while (netmask_num)
+        {
+            *cidr += netmask_num & 1;
+            netmask_num >>= 1;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * @brief  CIDR格式子网掩码转换为点分格式
+ * @param  netmask: 输出参数, 点分格式子网掩码
+ * @param  cidr   : 输入参数, CIDR格式子网掩码
+ * @return true : 成功
+ * @return false: 失败
+ */
+bool cidr_to_netmask(char *netmask, const uint8_t cidr)
+{
+    assert(NULL != netmask);
+
+    if ((cidr >= 0) && (cidr <= 32))
+    {
+        uint32_t netmask_num = htonl(0xFFFFFFFF << (32 - cidr));
+
+        struct in_addr addr = {0};
+        addr.s_addr = netmask_num;
+        snprintf(netmask, INET_ADDRSTRLEN, "%s", inet_ntoa(addr));
+
+        return true;
+    }
+
+    return false;
+}

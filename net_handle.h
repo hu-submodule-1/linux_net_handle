@@ -58,6 +58,24 @@ bool get_netmask(char *netmask, const char *interface_name);
  */
 bool set_netmask(const char *netmask, const char *interface_name);
 
+/**
+ * @brief  点分格式子网掩码转换为CIDR格式
+ * @param  cidr   : 输出参数, CIDR格式子网掩码
+ * @param  netmask: 输入参数, 点分格式子网掩码
+ * @return true : 成功
+ * @return false: 失败
+ */
+bool netmask_to_cidr(uint8_t *cidr, const char *netmask);
+
+/**
+ * @brief  CIDR格式子网掩码转换为点分格式
+ * @param  netmask: 输出参数, 点分格式子网掩码
+ * @param  cidr   : 输入参数, CIDR格式子网掩码
+ * @return true : 成功
+ * @return false: 失败
+ */
+bool cidr_to_netmask(char *netmask, const uint8_t cidr);
+
 #ifdef __cplusplus
 }
 #endif
