@@ -20,10 +20,18 @@
 #include <arpa/inet.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <netdb.h>
+#include <netinet/ip_icmp.h>
+#include <netinet/in.h>
+#include <errno.h>
+#include <time.h>
+#include <sys/select.h>
+#include <stdlib.h>
 
 #include "net_handle.h"
 
-/**                                                                                                                                                                                        * @brief  计算ICMP头部校验和
+/**
+ * @brief  计算ICMP头部校验和
  * @param  src_data    : 输入参数, 待校验源数据
  * @param  src_data_len: 输入参数, 待校验源数据长度
  * @return 校验值
@@ -52,12 +60,13 @@ static uint16_t icmp_check_sum(const uint16_t *src_data, const uint16_t src_data
 
 /**
  * @brief  ping指定地址
- * @param  fd       : 输入参数, 文件描述符
- * @param  ping_addr: 输入参数, 待ping的地址
- * @param  seq_num  : 输入参数, ping的序列号
+ * @param  fd         : 输入参数, 文件描述符
+ * @param  ping_addr  : 输入参数, 待ping的地址
+ * @param  seq_num    : 输入参数, ping的序列号
+ * @param  timeout_sec: 输入参数, 超时时间(单位: 秒)
  * @return 校验值
  */
-static bool ping(const int fd, const struct sockaddr *ping_addr, const uint16_t seq_num)
+static bool ping(const int fd, const struct sockaddr *ping_addr, const uint16_t seq_num, const uint8_t timeout_sec)
 {
 #define ICMP_DEFAULT_DATA_LEN 56
 #define ICMP_CUSTOM_DATA_LEN  8
@@ -91,7 +100,7 @@ static bool ping(const int fd, const struct sockaddr *ping_addr, const uint16_t 
     FD_SET(fd, &recv_fds);
 
     struct timeval timeout;
-    timeout.tv_sec = 1;
+    timeout.tv_sec = timeout_sec;
     timeout.tv_usec = 0;
 
     ret = select(fd + 1, &recv_fds, NULL, NULL, &timeout);
@@ -120,9 +129,9 @@ static bool ping(const int fd, const struct sockaddr *ping_addr, const uint16_t 
     uint32_t recv_icmp_packet_len = ret - ip_header_len;
 
     // 校验ICMP类型和代码
-    if ((recv_icmp_packet_len != sizeof(send_icmp_packet)) || (recv_icmp->icmp_type != ICMP_ECHOREPLY)
-        || (recv_icmp->icmp_id != send_icmp->icmp_id) || (recv_icmp->icmp_seq != send_icmp->icmp_seq)
-        || (memcmp(recv_icmp->icmp_data, send_icmp->icmp_data, ICMP_CUSTOM_DATA_LEN) != 0))
+    if ((recv_icmp_packet_len != sizeof(send_icmp_packet)) || (recv_icmp->icmp_type != ICMP_ECHOREPLY) ||
+        (recv_icmp->icmp_id != send_icmp->icmp_id) || (recv_icmp->icmp_seq != send_icmp->icmp_seq) ||
+        (memcmp(recv_icmp->icmp_data, send_icmp->icmp_data, ICMP_CUSTOM_DATA_LEN) != 0))
     {
         return false;
     }
@@ -411,24 +420,35 @@ bool get_gateway_addr(char *gateway_addr, const char *interface_name)
 
     // 跳过表头
     char line[256] = "";
-    fgets(line, sizeof(line), fp);
+    if (fgets(line, sizeof(line), fp) == NULL)
+    {
+        fclose(fp);
+
+        return false;
+    }
 
     // 逐行读取路由表
     while (fgets(line, sizeof(line), fp) != NULL)
     {
-        char iface[16] = "";
-        uint32_t destination = 0;
-        uint32_t gateway = 0;
-        if (sscanf(line, "%15s %d %d", iface, &destination, &gateway) == 3)
+        char *iface = strtok(line, "\t");
+        char *destination = strtok(NULL, "\t");
+        char *gateway = strtok(NULL, "\t");
+        if ((iface == NULL) || (destination == NULL) || (gateway == NULL))
         {
-            // destination为0: 默认网关
-            if ((strcmp(iface, interface_name) == 0) && (destination == 0))
-            {
-                snprintf(gateway_addr, INET_ADDRSTRLEN, "%s", inet_ntoa(*(struct in_addr *)&gateway));
-                fclose(fp);
+            continue;
+        }
 
-                return true;
-            }
+        if ((strcmp(iface, interface_name) == 0) && (strcmp(destination, "00000000") == 0))
+        {
+            uint32_t gateway_tmp = strtoul(gateway, NULL, 16);
+
+            snprintf(gateway_addr, INET_ADDRSTRLEN, "%d.%d.%d.%d", (uint8_t)(gateway_tmp & 0xFF),
+                     (uint8_t)((gateway_tmp >> 8) & 0xFF), (uint8_t)((gateway_tmp >> 16) & 0xFF),
+                     (uint8_t)((gateway_tmp >> 24) & 0xFF));
+
+            fclose(fp);
+
+            return true;
         }
     }
 
@@ -439,12 +459,13 @@ bool get_gateway_addr(char *gateway_addr, const char *interface_name)
 
 /**
  * @brief  ping主机
- * @param  hostname  : 输入参数, 主机地址(域名或IP)
- * @param  ping_count: 输入参数, ping的次数
+ * @param  hostname   : 输入参数, 主机地址(域名或IP)
+ * @param  ping_count : 输入参数, ping的次数
+ * @param  timeout_sec: 输入参数, 超时时间(单位: 秒)
  * @return true : 成功
  * @return false: 失败
  */
-bool ping_host(const char *hostname, const uint8_t ping_count)
+bool ping_host(const char *hostname, const uint8_t ping_count, const uint8_t timeout_sec)
 {
     struct addrinfo hints = {0};
     memset(&hints, 0, sizeof(struct addrinfo));
@@ -471,7 +492,7 @@ bool ping_host(const char *hostname, const uint8_t ping_count)
 
     // 设置套接字超时
     struct timeval timeout;
-    timeout.tv_sec = 1;
+    timeout.tv_sec = timeout_sec;
     timeout.tv_usec = 0;
     ret = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval));
     if (ret < 0)
@@ -483,7 +504,7 @@ bool ping_host(const char *hostname, const uint8_t ping_count)
 
     for (uint8_t i = 1; i <= ping_count; i++)
     {
-        if (!ping(fd, &ping_addr, i))
+        if (!ping(fd, &ping_addr, i, timeout_sec))
         {
             close(fd);
 

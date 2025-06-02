@@ -96,12 +96,13 @@ bool get_gateway_addr(char *gateway_addr, const char *interface_name);
 
 /**
  * @brief  ping主机
- * @param  hostname  : 输入参数, 主机地址(域名或IP)
- * @param  ping_count: 输入参数, ping的次数
+ * @param  hostname   : 输入参数, 主机地址(域名或IP)
+ * @param  ping_count : 输入参数, ping的次数
+ * @param  timeout_sec: 输入参数, 超时时间(单位: 秒)
  * @return true : 成功
  * @return false: 失败
  */
-bool ping_host(const char *hostname, const uint8_t ping_count);
+bool ping_host(const char *hostname, const uint8_t ping_count, const uint8_t timeout_sec);
 
 #ifdef __cplusplus
 }
